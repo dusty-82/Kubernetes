@@ -1,0 +1,60 @@
+---
+
+- name: Create Users local folder
+  ansible.builtin.file:
+    path: "{{ k8s_local_workdir }}/{{ item }}"
+    state: directory
+    mode: '0750'
+  with_items:
+    - users
+    - pki
+  delegate_to: localhost
+
+- name: Copy remote /etc/kubernetes/pki certs on local directory
+  ansible.builtin.fetch:
+    src: '/etc/kubernetes/pki/{{ item }}'
+    dest: "{{ k8s_local_workdir }}/pki/"
+    flat: true
+    mode: '0640'
+  become: true
+  with_items:
+    - ca.crt
+    - ca.key
+
+- name: Create Users resource files
+  ansible.builtin.include_tasks: create-resource-from-template.yml
+  with_items:
+    # Users roles
+    - name: users/users-roles
+    # Users role bindings
+    - name: users/users-rolebindings
+
+- name: Create Users certificates
+  ansible.builtin.include_tasks: users-certificates.yml
+  with_items:
+    - "{{ k8s_users }}"
+  loop_control:
+    loop_var: k8s_user
+
+- name: Get Users certificates
+  block:
+    - name: Copy kubeconfig in local users dir
+      ansible.builtin.copy:
+        src: "{{ k8s_local_workdir }}/admin.conf"
+        dest: "{{ k8s_local_workdir }}/users/users.conf"
+        mode: '0640'
+      delegate_to: localhost
+
+    - name: "Set k8s_users_kubeconfig fact users/users.conf under {{ k8s_local_workdir }}"
+      ansible.builtin.set_fact:
+        k8s_users_kubeconfig: "{{ k8s_local_workdir }}/users/users.conf"
+
+    - name: Setup user kubeconfig files
+      ansible.builtin.include_tasks: users-kubeconfig.yml
+      with_items:
+        - "{{ k8s_users }}"
+      loop_control:
+        loop_var: k8s_user
+  when:
+    - k8s_force_users_kubeconfig_generation is defined
+    - k8s_force_users_kubeconfig_generation|bool
