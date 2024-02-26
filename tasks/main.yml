@@ -1,0 +1,76 @@
+---
+
+- name: Apply common tasks to all nodes
+  ansible.builtin.import_tasks: common.yml
+  become: true
+
+- name: Setup local folders
+  block:
+    - name: Set k8s_kubeconfig fact
+      ansible.builtin.set_fact:
+        k8s_kubeconfig: "{{ k8s_local_workdir }}/admin.conf"
+      delegate_to: localhost
+
+    - name: Reset Kubernetes local folder
+      ansible.builtin.file:
+        path: "{{ k8s_local_workdir }}"
+        state: absent
+      delegate_to: localhost
+      when:
+        - k8s_reset|bool
+
+    - name: Create Kubernetes local folder
+      ansible.builtin.file:
+        path: "{{ k8s_local_workdir }}"
+        state: directory
+        mode: '0750'
+      delegate_to: localhost
+  run_once: true
+
+- name: Master tasks
+  ansible.builtin.import_tasks: master.yml
+  when:
+    - k8s_role is defined
+    - k8s_role == 'master'
+
+- name: Worker tasks
+  ansible.builtin.import_tasks: worker.yml
+  when:
+    - k8s_role is defined
+    - k8s_role == 'worker'
+
+- name: Specific components tasks
+  block:
+    - name: Dashboard
+      ansible.builtin.include_tasks: dashboard.yml
+      when:
+        - k8s_dashboard_enable|bool
+
+    - name: Users
+      ansible.builtin.include_tasks: users.yml
+      when:
+        - k8s_users is defined
+
+    - name: Ceph CSI
+      ansible.builtin.include_tasks: ceph-csi.yml
+      when:
+        - k8s_ceph_csi_enable|bool
+
+    - name: MetalLB
+      ansible.builtin.include_tasks: metallb.yml
+      when:
+        - k8s_metallb_enable|bool
+
+    - name: Ingress NGINX
+      ansible.builtin.include_tasks: ingress-nginx.yml
+      when:
+        - k8s_ingress_nginx_enable|bool
+
+    - name: Cert Manager
+      ansible.builtin.include_tasks: cert-manager.yml
+      when:
+        - k8s_cert_manager_enable|bool
+  when:
+    - k8s_role is defined
+    - k8s_role == 'master'
+    - inventory_hostname == k8s_master_node
